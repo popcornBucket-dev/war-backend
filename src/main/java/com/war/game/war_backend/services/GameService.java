@@ -11,9 +11,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
-
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -48,6 +45,8 @@ import com.war.game.war_backend.repository.PlayerRepository;
 import com.war.game.war_backend.repository.TerritoryBorderRepository;
 import com.war.game.war_backend.repository.TerritoryRepository;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -1521,139 +1520,6 @@ public class GameService {
   @Transactional(readOnly = true)
   public List<PlayerCard> getPlayerCards(PlayerGame pg) {
     return playerCardRepository.findByPlayerGame(pg);
-  }
-
-  // IA =======================================
-
-  @Transactional
-  public Game addBotToLobby(Long lobbyId, String ownerUsername, String botUsername) {
-    // 1. Carregar e Validar o Lobby
-    Game game =
-        gameRepository
-            .findById(lobbyId)
-            .orElseThrow(() -> new RuntimeException("Lobby não encontrado."));
-
-    if (!GameStatus.LOBBY.name().equals(game.getStatus())) {
-      throw new RuntimeException(
-          "Não é possível adicionar jogadores, o jogo não está mais em fase de Lobby.");
-    }
-
-    // 2. Validar Permissão (Dono do Lobby)
-    Player ownerPlayer = playerService.getPlayerByUsername(ownerUsername);
-    boolean isOwner =
-        game.getPlayerGames().stream()
-            .filter(pg -> pg.getPlayer().equals(ownerPlayer))
-            .anyMatch(PlayerGame::getIsOwner);
-
-    if (!isOwner) {
-      throw new RuntimeException("Apenas o dono do lobby pode adicionar um BOT.");
-    }
-
-    Set<PlayerGame> currentPlayers = game.getPlayerGames();
-
-    // 3. Validar Limite de Jogadores
-    if (currentPlayers.size() >= GameConstants.MAX_PLAYERS) {
-      throw new RuntimeException(
-          "O lobby atingiu o número máximo de jogadores (" + GameConstants.MAX_PLAYERS + ").");
-    }
-
-    // 4. Buscar e Validar o BOT
-    Player botPlayer =
-        playerRepository
-            .findByUsername(botUsername)
-            .orElseThrow(
-                () -> new RuntimeException("BOT não encontrado com o username: " + botUsername));
-
-    if (botPlayer.getType() == PlayerType.HUMAN) {
-      throw new RuntimeException(
-          "O usuário " + botUsername + " não é um BOT e deve entrar usando o endpoint /join.");
-    }
-
-    // 5. Verificar se o BOT já está na partida
-    boolean botAlreadyInGame =
-        currentPlayers.stream().anyMatch(pg -> pg.getPlayer().equals(botPlayer));
-
-    if (botAlreadyInGame) {
-      throw new RuntimeException("O BOT já está neste lobby.");
-    }
-
-    // Para atribuição de cor
-
-    Set<String> usedColors =
-        currentPlayers.stream()
-            .map(PlayerGame::getColor)
-            .filter(java.util.Objects::nonNull)
-            .collect(Collectors.toSet());
-
-    String assignedColor =
-        GameConstants.AVAILABLE_COLORS.stream()
-            .filter(color -> !usedColors.contains(color))
-            .findFirst()
-            .orElseThrow(() -> new RuntimeException("Erro interno: Nenhuma cor disponível."));
-
-    // 6. Criar e Adicionar PlayerGame para o BOT
-    PlayerGame botPlayerGame = new PlayerGame();
-    botPlayerGame.setGame(game);
-    botPlayerGame.setPlayer(botPlayer);
-    botPlayerGame.setUsername(botUsername);
-    botPlayerGame.setIsOwner(false);
-    botPlayerGame.setStillInGame(true);
-
-    // 7. Atribuição de cor
-    botPlayerGame.setColor(assignedColor);
-    botPlayerGame.setImageUrl(botPlayer.getImageUrl());
-
-    playerGameRepository.save(botPlayerGame);
-
-    game.getPlayerGames().add(botPlayerGame);
-
-    return gameRepository.save(game);
-  }
-
-  // Remove um BOT de um lobby existente.
-  @Transactional
-  public Game removeBotFromLobby(Long lobbyId, String ownerUsername, String botUsername) {
-    // 1. Carregar e Validar o Lobby
-    Game game =
-        gameRepository
-            .findById(lobbyId)
-            .orElseThrow(() -> new RuntimeException("Lobby não encontrado."));
-
-    if (!GameStatus.LOBBY.name().equals(game.getStatus())) {
-      throw new RuntimeException(
-          "Não é possível remover jogadores, o jogo não está mais em fase de Lobby.");
-    }
-
-    // 2. Validar Permissão (Dono do Lobby)
-    Player ownerPlayer = playerService.getPlayerByUsername(ownerUsername);
-    boolean isOwner =
-        game.getPlayerGames().stream()
-            .filter(pg -> pg.getPlayer().equals(ownerPlayer))
-            .anyMatch(PlayerGame::getIsOwner);
-
-    if (!isOwner) {
-      throw new RuntimeException("Apenas o dono do lobby pode remover um BOT.");
-    }
-
-    // 3. Buscar o PlayerGame do BOT
-    PlayerGame botPg =
-        game.getPlayerGames().stream()
-            .filter(pg -> pg.getUsername().equals(botUsername))
-            .findFirst()
-            .orElseThrow(
-                () -> new RuntimeException("O BOT " + botUsername + " não está neste lobby."));
-
-    // 4. Confirma se o alvo da remoção é de fato um BOT
-    if (botPg.getPlayer().getType() == PlayerType.HUMAN) {
-      throw new RuntimeException(
-          "Não é possível remover jogadores HUMANOS por este endpoint. Use /leave.");
-    }
-
-    // 5. Remover o BOT
-    game.getPlayerGames().remove(botPg);
-    playerGameRepository.delete(botPg);
-
-    return gameRepository.save(game);
   }
 
   // Decide a ação da IA baseada na fase.
